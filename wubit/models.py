@@ -1,17 +1,48 @@
 from django.db import models
-from django.contrib.auth import get_user_model
-import uuid
+from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
-from django.contrib.postgres.fields import JSONField
+import uuid
+from decimal import Decimal
 
-User = get_user_model()
+# -------------------- USER --------------------
+class User(AbstractUser):
+    USER_TYPES = (
+        ('seller', 'Seller'),
+        ('buyer', 'Buyer'),
+    )
+    user_type = models.CharField(max_length=10, choices=USER_TYPES)
+    telegram_id = models.CharField(max_length=50, blank=True, null=True)
+    phone_number = models.CharField(max_length=20, blank=True, null=True)
+    national_id = models.CharField(max_length=10, blank=True, null=True)
 
+    groups = models.ManyToManyField(
+        'auth.Group',
+        related_name='wubit_user_set',
+        blank=True,
+        help_text='The groups this user belongs to.',
+        verbose_name='groups'
+    )
+    user_permissions = models.ManyToManyField(
+        'auth.Permission',
+        related_name='wubit_user_permissions_set',
+        blank=True,
+        help_text='Specific permissions for this user.',
+        verbose_name='user permissions'
+    )
+
+
+
+    def __str__(self):
+        return f"{self.username} ({self.user_type})"
+
+
+# -------------------- STORE --------------------
 class Store(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     seller = models.OneToOneField(User, on_delete=models.CASCADE, related_name='store')
-    national_id = models.CharField(max_length=10)
     name_en = models.CharField(max_length=255)
     name_am = models.CharField(max_length=255, blank=True, null=True)
+    bio = models.TextField(blank=True)
     logo_url = models.URLField(blank=True, null=True)
     phone = models.CharField(max_length=50, blank=True, null=True)
     location = models.CharField(max_length=255, blank=True, null=True)
@@ -21,6 +52,8 @@ class Store(models.Model):
     def __str__(self):
         return self.name_en
 
+
+# -------------------- PRODUCT --------------------
 class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='products')
@@ -34,37 +67,54 @@ class Product(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
-        return self.name_en
+        return f"{self.name_en} ({self.store.name_en})"
 
+
+# -------------------- BUYER --------------------
+class Buyer(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='buyer_profile')
+    saved_products = models.ManyToManyField(Product, blank=True, related_name='saved_by')
+
+    def __str__(self):
+        return self.user.username
+
+
+# -------------------- CART --------------------
 class Cart(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='cart')
+    buyer = models.OneToOneField(Buyer, on_delete=models.CASCADE, related_name='cart')
     created_at = models.DateTimeField(default=timezone.now)
+
 
 class CartItem(models.Model):
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.IntegerField(default=1)
-    price_snapshot = models.DecimalField(max_digits=10, decimal_places=2)  # price at add time
+    price_snapshot = models.DecimalField(max_digits=10, decimal_places=2)
 
+
+# -------------------- WISHLIST --------------------
 class Wishlist(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='wishlist')
+    buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='wishlist')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     created_at = models.DateTimeField(default=timezone.now)
 
+
+# -------------------- ORDER --------------------
 class Order(models.Model):
     STATUS_CHOICES = [
         ('pending', 'Pending'),
         ('paid', 'Paid'),
         ('shipped', 'Shipped'),
-        ('completed', 'Completed')
+        ('completed', 'Completed'),
     ]
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    customer = models.ForeignKey(User, on_delete=models.CASCADE, related_name='orders')
+    buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='orders')
     total_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(default=timezone.now)
     metadata = models.JSONField(blank=True, null=True)
+
 
 class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
@@ -72,9 +122,29 @@ class OrderItem(models.Model):
     quantity = models.IntegerField(default=1)
     price_snapshot = models.DecimalField(max_digits=10, decimal_places=2)
 
-# Simple session storage for conversational multi-step flows
+
+# -------------------- REVIEW --------------------
+class Review(models.Model):
+    buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE)
+    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='reviews')
+    rating = models.IntegerField(default=5)
+    text = models.TextField()
+    created_at = models.DateTimeField(default=timezone.now)
+
+
+# -------------------- SELLER SESSION --------------------
 class SellerSession(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='seller_session')
-    state = models.CharField(max_length=100, blank=True, null=True)  # e.g., 'adding_product_name', 'adding_price', ...
+    state = models.CharField(max_length=100, blank=True, null=True)
     metadata = models.JSONField(blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+from django.conf import settings
+
+class BuyerSession(models.Model):
+    buyer = models.ForeignKey(Buyer, on_delete=models.CASCADE, related_name='buyer_sessions')  # Fixed: Changed from settings.AUTH_USER_MODEL to Buyer
+    data = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"BuyerSession({self.buyer.user.username})"
