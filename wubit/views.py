@@ -1,4 +1,4 @@
-# views.py (FINAL - Dual Role System)
+# views.py (FIXED - Automatic Store Creation)
 import os, json, requests
 from decimal import Decimal
 from django.conf import settings
@@ -213,11 +213,17 @@ Your store is ready! 🚀
             """
             send_telegram_message(chat_id, seller_commands, parse_mode='Markdown')
         else:
-            # Start seller registration
+            # Start seller registration IMMEDIATELY
             session, created = SellerSession.objects.get_or_create(
                 user=user,
                 defaults={'state': 'asking_phone', 'metadata': {}}
             )
+            
+            # If session exists but store creation wasn't completed, restart from phone
+            if session.state == 'seller_complete' and not user.has_store():
+                session.state = 'asking_phone'
+                session.metadata = {}
+                session.save()
             
             ask_phone_text = """
 🛍️ *Seller Registration - Step 1*
@@ -259,7 +265,35 @@ Happy shopping! 🛍️
         user.activate_buyer()
         Buyer.objects.get_or_create(user=user)
         
-        both_roles_text = """
+        # If user doesn't have store, start seller registration
+        if not user.has_store():
+            session, created = SellerSession.objects.get_or_create(
+                user=user,
+                defaults={'state': 'asking_phone', 'metadata': {}}
+            )
+            
+            if session.state == 'seller_complete' and not user.has_store():
+                session.state = 'asking_phone'
+                session.metadata = {}
+                session.save()
+            
+            both_roles_text = """
+🎭 *Dual Roles Activated!*
+
+You're now both a *Seller* and *Buyer*!
+
+Let's first set up your seller account so you can start selling.
+
+*Seller Registration - Step 1*
+
+Please send your *phone number* (Ethiopian format):
+
+Examples:
+• 0912345678  
+• +251912345678
+            """
+        else:
+            both_roles_text = """
 🎭 *Dual Roles Activated!*
 
 You're now both a *Seller* and *Buyer*!
@@ -272,7 +306,7 @@ You're now both a *Seller* and *Buyer*!
 What would you like to do first?
 /seller - Seller features
 /buyer - Buyer features
-        """
+            """
         send_telegram_message(chat_id, both_roles_text, parse_mode='Markdown')
     
     else:
@@ -372,11 +406,40 @@ Or type *both* to activate both seller and buyer roles.
         send_telegram_message(chat_id, activate_seller_text, parse_mode='Markdown')
         return JsonResponse({'status': 'success'})
     
+    # If user doesn't have a store, start store creation
+    if not user.has_store():
+        session, created = SellerSession.objects.get_or_create(
+            user=user,
+            defaults={'state': 'asking_phone', 'metadata': {}}
+        )
+        
+        # Reset session if it was completed but no store exists
+        if session.state == 'seller_complete':
+            session.state = 'asking_phone'
+            session.metadata = {}
+            session.save()
+        
+        store_setup_text = """
+🛍️ *Let's Set Up Your Store!*
+
+It looks like you don't have a store yet. Let's create one so you can start selling!
+
+*Seller Registration - Step 1*
+
+Please send your *phone number* (Ethiopian format):
+
+Examples:
+• 0912345678  
+• +251912345678
+        """
+        send_telegram_message(chat_id, store_setup_text, parse_mode='Markdown')
+        return JsonResponse({'status': 'success'})
+    
     try:
         session, created = SellerSession.objects.get_or_create(user=user)
         
         if not session.state:
-            session.state = 'asking_phone'
+            session.state = 'seller_complete'
             session.save()
         
         print(f"🔧 Seller {user.username} state: {session.state}")
@@ -417,6 +480,36 @@ def handle_seller_commands(chat_id, user, text):
     if not user.is_seller:
         return handle_role_selection(chat_id, user, 'seller')
     
+    # If user doesn't have a store, start store creation
+    if not user.has_store():
+        session, created = SellerSession.objects.get_or_create(
+            user=user,
+            defaults={'state': 'asking_phone', 'metadata': {}}
+        )
+        
+        # Reset session if it was completed but no store exists
+        if session.state == 'seller_complete':
+            session.state = 'asking_phone'
+            session.metadata = {}
+            session.save()
+        
+        store_setup_text = """
+🛍️ *Let's Set Up Your Store!*
+
+It looks like you don't have a store yet. Let's create one so you can start selling!
+
+*Seller Registration - Step 1*
+
+Please send your *phone number* (Ethiopian format):
+
+Examples:
+• 0912345678  
+• +251912345678
+        """
+        send_telegram_message(chat_id, store_setup_text, parse_mode='Markdown')
+        return JsonResponse({'status': 'success'})
+    
+    # User has store - handle commands normally
     if text.lower() == '/addproduct':
         session = SellerSession.objects.get(user=user)
         session.state = 'adding_product_name'
@@ -530,7 +623,7 @@ def handle_buyer_commands(chat_id, user, text):
     
     return JsonResponse({'status': 'success'})
 
-# ---- Store Setup Flow (Keep all existing functions) ----
+# ---- Store Setup Flow ----
 def handle_phone_input(chat_id, user, session, text):
     phone = text.strip().replace(' ', '').replace('-', '')
     if len(phone) < 9:
@@ -679,7 +772,7 @@ Now you can start adding products and selling!
     
     return JsonResponse({'status': 'success'})
 
-# ---- Product Addition Flow (Keep all existing functions) ----
+# ---- Product Addition Flow ----
 def handle_product_name_input(chat_id, user, session, text):
     if not text:
         send_telegram_message(chat_id, "🆕 Please enter the product name:")
