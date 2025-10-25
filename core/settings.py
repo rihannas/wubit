@@ -28,6 +28,10 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['wubit-4.onrender.com']
 
+CSRF_TRUSTED_ORIGINS = [
+    'https://wubit-4.onrender.com',
+]
+
 from dotenv import load_dotenv
 
 load_dotenv()  # Load .env file
