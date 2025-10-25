@@ -34,6 +34,8 @@ load_dotenv()  # Load .env file
 
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 
+TELEGRAM_WEBHOOK_URL = 'https://wubit-4.onrender.com/telegram/webhook/'
+
 # Application definition
 
 INSTALLED_APPS = [
