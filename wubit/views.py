@@ -73,7 +73,6 @@ def send_telegram_message(chat_id, text, parse_mode=None):
         print(f"❌ Error sending message: {e}")
 
 # ---- Main Webhook Handler ----
-@csrf_exempt
 def telegram_webhook(request):
     if request.method != 'POST':
         return JsonResponse({'status': 'ok'})
@@ -135,12 +134,25 @@ def telegram_webhook(request):
             return handle_buyer_commands(chat_id, user, text)
         elif user.is_seller and user.is_buyer:
             # Both roles active - check context or show help
-            if any(word in text.lower() for word in ['store', 'product', 'sell', 'price']):
+            if any(word in text.lower() for word in ['store', 'product', 'sell', 'price', 'phone', 'national', 'location', 'bio']):
                 return handle_seller_flow(chat_id, user, text)
             elif any(word in text.lower() for word in ['buy', 'shop', 'cart', 'order']):
                 return handle_buyer_commands(chat_id, user, text)
             else:
-                return handle_help_command(chat_id, user)
+                # If no context detected, check if user has store
+                has_store = False
+                try:
+                    store = Store.objects.get(seller=user)
+                    has_store = True
+                except Store.DoesNotExist:
+                    has_store = False
+                
+                if not has_store:
+                    # No store - start seller flow to create store
+                    return handle_seller_flow(chat_id, user, text)
+                else:
+                    # Has store - show help
+                    return handle_help_command(chat_id, user)
         else:
             # No roles active - show role selection
             return handle_role_selection(chat_id, user, '')
@@ -148,7 +160,7 @@ def telegram_webhook(request):
     except Exception as e:
         print(f"❌ Webhook error: {e}")
         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
-
+    
 # ---- Helper Functions ----
 def get_or_create_user(chat_id, first_name):
     """Get or create user with telegram ID"""
@@ -197,7 +209,15 @@ def handle_role_selection(chat_id, user, text):
     if text_lower in ['seller', 'ነጋዴ', 'ሻጭ']:
         user.activate_seller()
         
-        if user.has_store():
+        # Check if user has a store
+        has_store = False
+        try:
+            store = Store.objects.get(seller=user)
+            has_store = True
+        except Store.DoesNotExist:
+            has_store = False
+        
+        if has_store:
             # Already has store - show seller commands
             seller_commands = """
 🛍️ *Seller Mode Activated!*
@@ -214,16 +234,12 @@ Your store is ready! 🚀
             send_telegram_message(chat_id, seller_commands, parse_mode='Markdown')
         else:
             # Start seller registration IMMEDIATELY
-            session, created = SellerSession.objects.get_or_create(
-                user=user,
-                defaults={'state': 'asking_phone', 'metadata': {}}
-            )
+            session, created = SellerSession.objects.get_or_create(user=user)
             
-            # If session exists but store creation wasn't completed, restart from phone
-            if session.state == 'seller_complete' and not user.has_store():
-                session.state = 'asking_phone'
-                session.metadata = {}
-                session.save()
+            # Force start from phone step
+            session.state = 'asking_phone'
+            session.metadata = {}
+            session.save()
             
             ask_phone_text = """
 🛍️ *Seller Registration - Step 1*
@@ -265,17 +281,21 @@ Happy shopping! 🛍️
         user.activate_buyer()
         Buyer.objects.get_or_create(user=user)
         
-        # If user doesn't have store, start seller registration
-        if not user.has_store():
-            session, created = SellerSession.objects.get_or_create(
-                user=user,
-                defaults={'state': 'asking_phone', 'metadata': {}}
-            )
+        # Check if user has a store
+        has_store = False
+        try:
+            store = Store.objects.get(seller=user)
+            has_store = True
+        except Store.DoesNotExist:
+            has_store = False
+        
+        if not has_store:
+            # Start seller registration
+            session, created = SellerSession.objects.get_or_create(user=user)
             
-            if session.state == 'seller_complete' and not user.has_store():
-                session.state = 'asking_phone'
-                session.metadata = {}
-                session.save()
+            session.state = 'asking_phone'
+            session.metadata = {}
+            session.save()
             
             both_roles_text = """
 🎭 *Dual Roles Activated!*
@@ -292,6 +312,7 @@ Examples:
 • 0912345678  
 • +251912345678
             """
+            send_telegram_message(chat_id, both_roles_text, parse_mode='Markdown')
         else:
             both_roles_text = """
 🎭 *Dual Roles Activated!*
@@ -307,7 +328,7 @@ What would you like to do first?
 /seller - Seller features
 /buyer - Buyer features
             """
-        send_telegram_message(chat_id, both_roles_text, parse_mode='Markdown')
+            send_telegram_message(chat_id, both_roles_text, parse_mode='Markdown')
     
     else:
         help_text = """
@@ -321,7 +342,6 @@ You can switch anytime! 🔄
         send_telegram_message(chat_id, help_text, parse_mode='Markdown')
     
     return JsonResponse({'status': 'success'})
-
 def handle_help_command(chat_id, user):
     """Show help based on active roles"""
     if user.is_seller and user.is_buyer:
