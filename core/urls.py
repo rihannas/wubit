@@ -19,7 +19,7 @@ from django.urls import path, include
 from django.conf.urls.static import static
 from django.conf import settings
 from django.http import JsonResponse
-
+from wubit import views
 
 def test_view(request):
     return JsonResponse({'status': 'URLs are working!'})
@@ -28,4 +28,6 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('test/', test_view),
     path('', include('wubit.urls')),
+   path('telegram/webhook/', views.telegram_webhook, name='telegram_webhook'),
+
 ] + static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT) 
