@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'wubit',
     'rest_framework',
-    'django_extensions',
 ]
 
 MIDDLEWARE = [
