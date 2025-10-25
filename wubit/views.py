@@ -409,91 +409,44 @@ Each role has different commands and features!
 
 # ---- Seller Flow ----
 def handle_seller_flow(chat_id, user, text):
-    """Handle seller interactions"""
+    """Handle seller interactions with session resume"""
     if not user.is_seller:
-        activate_seller_text = """
-🛍️ *Seller Mode Required*
-
-You need to activate seller mode first!
-
-Type *seller* to switch to seller mode and access:
-• Store management
-• Product addition  
-• Sales analytics
-
-Or type *both* to activate both seller and buyer roles.
-        """
-        send_telegram_message(chat_id, activate_seller_text, parse_mode='Markdown')
+        # Activate seller first
+        send_telegram_message(chat_id, "Please activate seller mode first! Type 'seller'.", parse_mode='Markdown')
         return JsonResponse({'status': 'success'})
-    
-    # If user doesn't have a store, start store creation
-    if not user.has_store():
-        session, created = SellerSession.objects.get_or_create(
-            user=user,
-            defaults={'state': 'asking_phone', 'metadata': {}}
-        )
-        
-        # Reset session if it was completed but no store exists
-        if session.state == 'seller_complete':
+
+    session, created = SellerSession.objects.get_or_create(user=user)
+
+    # Resume from correct step
+    if not session.state:
+        # Determine starting step
+        if not user.phone_number:
             session.state = 'asking_phone'
-            session.metadata = {}
-            session.save()
-        
-        store_setup_text = """
-🛍️ *Let's Set Up Your Store!*
-
-It looks like you don't have a store yet. Let's create one so you can start selling!
-
-*Seller Registration - Step 1*
-
-Please send your *phone number* (Ethiopian format):
-
-Examples:
-• 0912345678  
-• +251912345678
-        """
-        send_telegram_message(chat_id, store_setup_text, parse_mode='Markdown')
-        return JsonResponse({'status': 'success'})
-    
-    try:
-        session, created = SellerSession.objects.get_or_create(user=user)
-        
-        if not session.state:
-            session.state = 'seller_complete'
-            session.save()
-        
-        print(f"🔧 Seller {user.username} state: {session.state}")
-        
-        # Handle store setup states
-        if session.state == 'asking_phone':
-            return handle_phone_input(chat_id, user, session, text)
-        elif session.state == 'asking_national_id':
-            return handle_national_id_input(chat_id, user, session, text)
-        elif session.state == 'asking_store_name':
-            return handle_store_name_input(chat_id, user, session, text)
-        elif session.state == 'asking_store_bio':
-            return handle_store_bio_input(chat_id, user, session, text)
-        elif session.state == 'asking_store_location':
-            return handle_store_location_input(chat_id, user, session, text)
-        elif session.state == 'seller_complete':
-            return handle_seller_commands(chat_id, user, text)
-        elif session.state == 'adding_product_name':
-            return handle_product_name_input(chat_id, user, session, text)
-        elif session.state == 'adding_product_price':
-            return handle_product_price_input(chat_id, user, session, text)
-        elif session.state == 'adding_product_description':
-            return handle_product_description_input(chat_id, user, session, text)
-        elif session.state == 'adding_product_quantity':
-            return handle_product_quantity_input(chat_id, user, session, text)
+        elif not user.national_id:
+            session.state = 'asking_national_id'
+        elif not user.has_store():
+            session.state = 'asking_store_name'
         else:
             session.state = 'seller_complete'
-            session.save()
-            return handle_seller_commands(chat_id, user, text)
-            
-    except Exception as e:
-        print(f"❌ Seller flow error: {e}")
-        send_telegram_message(chat_id, "Sorry, something went wrong. Type *seller* to try again.")
-        return JsonResponse({'status': 'error'})
+        session.save()
+
+    # Route based on state
+    if session.state == 'asking_phone':
+        return handle_phone_input(chat_id, user, session, text)
+    elif session.state == 'asking_national_id':
+        return handle_national_id_input(chat_id, user, session, text)
+    elif session.state == 'asking_store_name':
+        return handle_store_name_input(chat_id, user, session, text)
+    elif session.state == 'asking_store_bio':
+        return handle_store_bio_input(chat_id, user, session, text)
+    elif session.state == 'asking_store_location':
+        return handle_store_location_input(chat_id, user, session, text)
+    elif session.state == 'seller_complete':
+        return handle_seller_commands(chat_id, user, text)
+    else:
+        session.state = 'seller_complete'
+        session.save()
+        return handle_seller_commands(chat_id, user, text)
 
 def handle_seller_commands(chat_id, user, text):
     """Handle seller commands"""
