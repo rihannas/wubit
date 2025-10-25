@@ -40,8 +40,7 @@ class User(AbstractUser):
 class Store(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     seller = models.OneToOneField(User, on_delete=models.CASCADE, related_name='store')
-    name_en = models.CharField(max_length=255)
-    name_am = models.CharField(max_length=255, blank=True, null=True)
+    name = models.CharField(max_length=255)
     bio = models.TextField(blank=True)
     logo_url = models.URLField(blank=True, null=True)
     phone = models.CharField(max_length=50, blank=True, null=True)
@@ -50,17 +49,15 @@ class Store(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
     def __str__(self):
-        return self.name_en
+        return self.name
 
 
 # -------------------- PRODUCT --------------------
 class Product(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     store = models.ForeignKey(Store, on_delete=models.CASCADE, related_name='products')
-    name_en = models.CharField(max_length=255)
-    name_am = models.CharField(max_length=255, blank=True, null=True)
-    description_en = models.TextField(blank=True, null=True)
-    description_am = models.TextField(blank=True, null=True)
+    name = models.CharField(max_length=255)
+    description = models.TextField(blank=True, null=True)
     price = models.DecimalField(max_digits=10, decimal_places=2)
     image_url = models.URLField(blank=True, null=True)
     stock_quantity = models.IntegerField(default=0)
@@ -90,7 +87,6 @@ class CartItem(models.Model):
     cart = models.ForeignKey(Cart, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.CASCADE)
     quantity = models.IntegerField(default=1)
-    price_snapshot = models.DecimalField(max_digits=10, decimal_places=2)
 
 
 # -------------------- WISHLIST --------------------
@@ -120,7 +116,6 @@ class OrderItem(models.Model):
     order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name='items')
     product = models.ForeignKey(Product, on_delete=models.PROTECT)
     quantity = models.IntegerField(default=1)
-    price_snapshot = models.DecimalField(max_digits=10, decimal_places=2)
 
 
 # -------------------- REVIEW --------------------

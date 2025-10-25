@@ -43,13 +43,13 @@ admin.site.register(Buyer, BuyerAdmin)
 # Store & Product Admin
 # -------------------------------
 class StoreAdmin(admin.ModelAdmin):
-    list_display = ('name_en', 'seller', 'verified', 'created_at')
-    search_fields = ('name_en', 'seller__username')
+    list_display = ('name', 'seller', 'verified', 'created_at')
+    search_fields = ('name', 'seller__username')
     list_filter = ('verified',)
 
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('name_en', 'store', 'price', 'stock_quantity', 'created_at')
-    search_fields = ('name_en', 'store__name_en')
+    list_display = ('name', 'store', 'price', 'stock_quantity', 'created_at')
+    search_fields = ('name', 'store__name')
     list_filter = ('store',)
 
 admin.site.register(Store, StoreAdmin)
@@ -62,7 +62,7 @@ class CartAdmin(admin.ModelAdmin):
     list_display = ('buyer', 'created_at')
 
 class CartItemAdmin(admin.ModelAdmin):
-    list_display = ('cart', 'product', 'quantity', 'price_snapshot')
+    list_display = ('cart', 'product', 'quantity', )
 
 admin.site.register(Cart, CartAdmin)
 admin.site.register(CartItem, CartItemAdmin)
@@ -73,7 +73,7 @@ class OrderAdmin(admin.ModelAdmin):
     search_fields = ('buyer__user__username',)
 
 class OrderItemAdmin(admin.ModelAdmin):
-    list_display = ('order', 'product', 'quantity', 'price_snapshot')
+    list_display = ('order', 'product', 'quantity', )
 
 admin.site.register(Order, OrderAdmin)
 admin.site.register(OrderItem, OrderItemAdmin)
