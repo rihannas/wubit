@@ -26,7 +26,7 @@ SECRET_KEY = 'django-insecure-x=7^yn25rkru#=82x2xjh+)98ib2^2umd=(c9b5h#j@!rj(1&t
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['wubit-4.onrender.com']
 
 from dotenv import load_dotenv
 
