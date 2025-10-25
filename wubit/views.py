@@ -1,4 +1,4 @@
-# views.py (FIXED - Automatic Store Creation)
+# views.py (FIXED - Product Addition Flow)
 import os, json, requests
 from decimal import Decimal
 from django.conf import settings
@@ -100,6 +100,18 @@ def telegram_webhook(request):
         
         # Get or create user
         user = get_or_create_user(chat_id, first_name)
+        
+        # Check if user is in active seller session (including product addition)
+        try:
+            session = SellerSession.objects.get(user=user)
+            if session.state and session.state.startswith('adding_product_'):
+                # User is in middle of product addition - route to seller flow
+                return handle_seller_flow(chat_id, user, text)
+            elif session.state and session.state != 'seller_complete':
+                # User is in middle of store setup - route to seller flow
+                return handle_seller_flow(chat_id, user, text)
+        except SellerSession.DoesNotExist:
+            pass
         
         # Handle role selection commands
         if text.lower() in ['seller', 'buyer', 'both', 'ነጋዴ', 'ሻጭ', 'ደንበኛ', 'ኩሉ']:
@@ -342,6 +354,7 @@ You can switch anytime! 🔄
         send_telegram_message(chat_id, help_text, parse_mode='Markdown')
     
     return JsonResponse({'status': 'success'})
+
 def handle_help_command(chat_id, user):
     """Show help based on active roles"""
     if user.is_seller and user.is_buyer:
@@ -399,7 +412,6 @@ Type any command to continue!
 Choose a role to begin:
 • Type *seller* - To sell products
 • Type *buyer* - To shop products  
-• Type *both* - For both roles
 
 Each role has different commands and features!
         """
@@ -411,42 +423,70 @@ Each role has different commands and features!
 def handle_seller_flow(chat_id, user, text):
     """Handle seller interactions with session resume"""
     if not user.is_seller:
-        # Activate seller first
-        send_telegram_message(chat_id, "Please activate seller mode first! Type 'seller'.", parse_mode='Markdown')
+        activate_seller_text = """
+🛍️ *Seller Mode Required*
+
+You need to activate seller mode first!
+
+Type *seller* to switch to seller mode and access:
+• Store management
+• Product addition  
+• Sales analytics
+
+Or type *both* to activate both seller and buyer roles.
+        """
+        send_telegram_message(chat_id, activate_seller_text, parse_mode='Markdown')
         return JsonResponse({'status': 'success'})
-
-    session, created = SellerSession.objects.get_or_create(user=user)
-
-    # Resume from correct step
-    if not session.state:
-        # Determine starting step
-        if not user.phone_number:
-            session.state = 'asking_phone'
-        elif not user.national_id:
-            session.state = 'asking_national_id'
-        elif not user.has_store():
-            session.state = 'asking_store_name'
+    
+    try:
+        session, created = SellerSession.objects.get_or_create(user=user)
+        
+        # If session was just created, initialize it
+        if created or not session.state:
+            # Determine starting step based on user progress
+            if not user.phone_number:
+                session.state = 'asking_phone'
+            elif not user.national_id:
+                session.state = 'asking_national_id'
+            elif not user.has_store():
+                session.state = 'asking_store_name'
+            else:
+                session.state = 'seller_complete'
+            session.save()
+        
+        print(f"🔧 Seller {user.username} state: {session.state}")
+        
+        # Handle store setup states
+        if session.state == 'asking_phone':
+            return handle_phone_input(chat_id, user, session, text)
+        elif session.state == 'asking_national_id':
+            return handle_national_id_input(chat_id, user, session, text)
+        elif session.state == 'asking_store_name':
+            return handle_store_name_input(chat_id, user, session, text)
+        elif session.state == 'asking_store_bio':
+            return handle_store_bio_input(chat_id, user, session, text)
+        elif session.state == 'asking_store_location':
+            return handle_store_location_input(chat_id, user, session, text)
+        elif session.state == 'seller_complete':
+            return handle_seller_commands(chat_id, user, text)
+        elif session.state == 'adding_product_name':
+            return handle_product_name_input(chat_id, user, session, text)
+        elif session.state == 'adding_product_price':
+            return handle_product_price_input(chat_id, user, session, text)
+        elif session.state == 'adding_product_description':
+            return handle_product_description_input(chat_id, user, session, text)
+        elif session.state == 'adding_product_quantity':
+            return handle_product_quantity_input(chat_id, user, session, text)
         else:
+            # Unknown state - reset to complete
             session.state = 'seller_complete'
-        session.save()
-
-    # Route based on state
-    if session.state == 'asking_phone':
-        return handle_phone_input(chat_id, user, session, text)
-    elif session.state == 'asking_national_id':
-        return handle_national_id_input(chat_id, user, session, text)
-    elif session.state == 'asking_store_name':
-        return handle_store_name_input(chat_id, user, session, text)
-    elif session.state == 'asking_store_bio':
-        return handle_store_bio_input(chat_id, user, session, text)
-    elif session.state == 'asking_store_location':
-        return handle_store_location_input(chat_id, user, session, text)
-    elif session.state == 'seller_complete':
-        return handle_seller_commands(chat_id, user, text)
-    else:
-        session.state = 'seller_complete'
-        session.save()
-        return handle_seller_commands(chat_id, user, text)
+            session.save()
+            return handle_seller_commands(chat_id, user, text)
+            
+    except Exception as e:
+        print(f"❌ Seller flow error: {e}")
+        send_telegram_message(chat_id, "Sorry, something went wrong. Type *seller* to try again.")
+        return JsonResponse({'status': 'error'})
 
 def handle_seller_commands(chat_id, user, text):
     """Handle seller commands"""
@@ -460,13 +500,15 @@ def handle_seller_commands(chat_id, user, text):
             defaults={'state': 'asking_phone', 'metadata': {}}
         )
         
-        # Reset session if it was completed but no store exists
-        if session.state == 'seller_complete':
+        # Only reset if not already in progress
+        if session.state == 'seller_complete' or not session.state:
             session.state = 'asking_phone'
             session.metadata = {}
             session.save()
         
-        store_setup_text = """
+        # Check current state to continue from where they left off
+        if session.state == 'asking_phone':
+            store_setup_text = """
 🛍️ *Let's Set Up Your Store!*
 
 It looks like you don't have a store yet. Let's create one so you can start selling!
@@ -478,13 +520,16 @@ Please send your *phone number* (Ethiopian format):
 Examples:
 • 0912345678  
 • +251912345678
-        """
-        send_telegram_message(chat_id, store_setup_text, parse_mode='Markdown')
+            """
+            send_telegram_message(chat_id, store_setup_text, parse_mode='Markdown')
+        else:
+            # Continue from current state
+            return handle_seller_flow(chat_id, user, '')
         return JsonResponse({'status': 'success'})
     
     # User has store - handle commands normally
     if text.lower() == '/addproduct':
-        session = SellerSession.objects.get(user=user)
+        session, created = SellerSession.objects.get_or_create(user=user)
         session.state = 'adding_product_name'
         session.metadata = {}
         session.save()
@@ -747,6 +792,7 @@ Now you can start adding products and selling!
 
 # ---- Product Addition Flow ----
 def handle_product_name_input(chat_id, user, session, text):
+    """Handle product name input"""
     if not text:
         send_telegram_message(chat_id, "🆕 Please enter the product name:")
         return JsonResponse({'status': 'success'})
@@ -762,7 +808,7 @@ def handle_product_name_input(chat_id, user, session, text):
     session.state = 'adding_product_price'
     session.save()
     
-    ask_price_text = """
+    ask_price_text = f"""
 💰 *Add Product - Step 2*
 
 What's the price of *{product_name}*? (in ETB)
@@ -771,11 +817,14 @@ Examples:
 • 150
 • 299.99
 • 1000
-    """.format(product_name=product_name)
+
+Please enter the price:
+    """
     send_telegram_message(chat_id, ask_price_text, parse_mode='Markdown')
     return JsonResponse({'status': 'success'})
 
 def handle_product_price_input(chat_id, user, session, text):
+    """Handle product price input"""
     if not text:
         send_telegram_message(chat_id, "💰 Please enter the product price:")
         return JsonResponse({'status': 'success'})
@@ -793,17 +842,20 @@ def handle_product_price_input(chat_id, user, session, text):
     session.state = 'adding_product_description'
     session.save()
     
-    ask_description_text = """
+    ask_description_text = f"""
 📝 *Add Product - Step 3*
 
-Describe *{product_name}*:
+Describe *{session.metadata['product_name']}*:
 
 Tell customers about features, quality, size, etc.
-    """.format(product_name=session.metadata['product_name'])
+
+Please enter the product description:
+    """
     send_telegram_message(chat_id, ask_description_text, parse_mode='Markdown')
     return JsonResponse({'status': 'success'})
 
 def handle_product_description_input(chat_id, user, session, text):
+    """Handle product description input"""
     if not text:
         send_telegram_message(chat_id, "📝 Please enter the product description:")
         return JsonResponse({'status': 'success'})
@@ -817,17 +869,23 @@ def handle_product_description_input(chat_id, user, session, text):
     session.state = 'adding_product_quantity'
     session.save()
     
-    ask_quantity_text = """
+    ask_quantity_text = f"""
 📦 *Add Product - Step 4*
 
-How many units of *{product_name}* do you have in stock?
+How many units of *{session.metadata['product_name']}* do you have in stock?
 
 Enter the quantity (whole number):
-    """.format(product_name=session.metadata['product_name'])
+
+Examples:
+• 10
+• 50
+• 100
+    """
     send_telegram_message(chat_id, ask_quantity_text, parse_mode='Markdown')
     return JsonResponse({'status': 'success'})
 
 def handle_product_quantity_input(chat_id, user, session, text):
+    """Handle product quantity input and create product"""
     if not text:
         send_telegram_message(chat_id, "📦 Please enter the stock quantity:")
         return JsonResponse({'status': 'success'})
@@ -863,6 +921,8 @@ def handle_product_quantity_input(chat_id, user, session, text):
 *Stock:* {product.stock_quantity} units
 
 Your product is now live in your store!
+
+Use /myproducts to see all your products.
         """
         send_telegram_message(chat_id, success_text, parse_mode='Markdown')
         
