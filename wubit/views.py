@@ -1,4 +1,4 @@
-# views.py (updated)
+# views.py (COMPLETE - with product addition flow)
 import os, json, requests
 from decimal import Decimal
 from django.conf import settings
@@ -204,6 +204,7 @@ def handle_seller_flow(chat_id, user, text):
         
         print(f"🔧 Seller {user.username} state: {session.state}")
         
+        # Handle store setup states
         if session.state == 'asking_phone':
             return handle_phone_input(chat_id, user, session, text)
         
@@ -221,13 +222,25 @@ def handle_seller_flow(chat_id, user, text):
             
         elif session.state == 'seller_complete':
             return handle_seller_commands(chat_id, user, text)
+        
+        # Handle product addition states
+        elif session.state == 'adding_product_name':
+            return handle_product_name_input(chat_id, user, session, text)
+            
+        elif session.state == 'adding_product_price':
+            return handle_product_price_input(chat_id, user, session, text)
+            
+        elif session.state == 'adding_product_description':
+            return handle_product_description_input(chat_id, user, session, text)
+            
+        elif session.state == 'adding_product_quantity':
+            return handle_product_quantity_input(chat_id, user, session, text)
             
         else:
             # Default fallback
-            session.state = 'asking_phone'
+            session.state = 'seller_complete'
             session.save()
-            send_telegram_message(chat_id, "Let's start with your phone number. Please send your phone number:")
-            return JsonResponse({'status': 'success'})
+            return handle_seller_commands(chat_id, user, text)
             
     except Exception as e:
         print(f"❌ Seller flow error: {e}")
@@ -254,7 +267,7 @@ def handle_phone_input(chat_id, user, session, text):
     ask_id_text = """
 🆔 *Seller Registration - Step 2*
 
-Please send your *National ID number*:
+Please send your *National ID number FIN*:
 
 This helps us verify your identity and build trust with customers.
 
@@ -269,7 +282,7 @@ def handle_national_id_input(chat_id, user, session, text):
     national_id = text.strip()
     
     if len(national_id) < 4:
-        send_telegram_message(chat_id, "❌ Please enter a valid National ID. Try again:")
+        send_telegram_message(chat_id, "❌ Please enter a valid National ID FIN. Try again:")
         return JsonResponse({'status': 'success'})
     
     # Save national ID
@@ -483,6 +496,180 @@ Use /addproduct to add more items!
 *Need help?* Contact support if you have questions!
         """
         send_telegram_message(chat_id, help_text, parse_mode='Markdown')
+    
+    return JsonResponse({'status': 'success'})
+
+# ---- Product Addition Flow ----
+def handle_product_name_input(chat_id, user, session, text):
+    """Handle product name input"""
+    if not text:
+        send_telegram_message(chat_id, "🆕 Please enter the product name:")
+        return JsonResponse({'status': 'success'})
+    
+    product_name = text.strip()
+    
+    if not product_name:
+        send_telegram_message(chat_id, "❌ Please enter a product name:")
+        return JsonResponse({'status': 'success'})
+    
+    # Save product name to session
+    if not session.metadata:
+        session.metadata = {}
+    
+    session.metadata['product_name'] = product_name
+    session.state = 'adding_product_price'
+    session.save()
+    
+    ask_price_text = """
+💰 *Add Product - Step 2*
+
+What's the price of *{product_name}*? (in ETB)
+
+Examples:
+• 150
+• 299.99
+• 1000
+
+Please enter only the number.
+    """.format(product_name=product_name)
+    
+    send_telegram_message(chat_id, ask_price_text, parse_mode='Markdown')
+    return JsonResponse({'status': 'success'})
+
+def handle_product_price_input(chat_id, user, session, text):
+    """Handle product price input"""
+    if not text:
+        send_telegram_message(chat_id, "💰 Please enter the product price:")
+        return JsonResponse({'status': 'success'})
+    
+    price_text = text.strip()
+    
+    try:
+        price = Decimal(price_text)
+        if price <= 0:
+            raise ValueError("Price must be positive")
+    except:
+        send_telegram_message(chat_id, "❌ Please enter a valid price (numbers only, positive value). Try again:")
+        return JsonResponse({'status': 'success'})
+    
+    # Save product price to session
+    session.metadata['product_price'] = str(price)
+    session.state = 'adding_product_description'
+    session.save()
+    
+    ask_description_text = """
+📝 *Add Product - Step 3*
+
+Describe *{product_name}*:
+
+Tell customers about:
+• Features
+• Quality
+• Size/weight
+• Any important details
+
+This helps customers understand your product better!
+    """.format(product_name=session.metadata['product_name'])
+    
+    send_telegram_message(chat_id, ask_description_text, parse_mode='Markdown')
+    return JsonResponse({'status': 'success'})
+
+def handle_product_description_input(chat_id, user, session, text):
+    """Handle product description input"""
+    if not text:
+        send_telegram_message(chat_id, "📝 Please enter the product description:")
+        return JsonResponse({'status': 'success'})
+    
+    description = text.strip()
+    
+    if not description:
+        send_telegram_message(chat_id, "❌ Please enter a product description:")
+        return JsonResponse({'status': 'success'})
+    
+    # Save product description to session
+    session.metadata['product_description'] = description
+    session.state = 'adding_product_quantity'
+    session.save()
+    
+    ask_quantity_text = """
+📦 *Add Product - Step 4*
+
+How many units of *{product_name}* do you have in stock?
+
+Enter the quantity (whole number):
+
+Examples:
+• 10
+• 50
+• 100
+
+Enter 0 if this is a service or digital product.
+    """.format(product_name=session.metadata['product_name'])
+    
+    send_telegram_message(chat_id, ask_quantity_text, parse_mode='Markdown')
+    return JsonResponse({'status': 'success'})
+
+def handle_product_quantity_input(chat_id, user, session, text):
+    """Finalize product creation"""
+    if not text:
+        send_telegram_message(chat_id, "📦 Please enter the stock quantity:")
+        return JsonResponse({'status': 'success'})
+    
+    quantity_text = text.strip()
+    
+    try:
+        quantity = int(quantity_text)
+        if quantity < 0:
+            raise ValueError("Quantity cannot be negative")
+    except:
+        send_telegram_message(chat_id, "❌ Please enter a valid quantity (whole number, 0 or more). Try again:")
+        return JsonResponse({'status': 'success'})
+    
+    try:
+        # Get user's store
+        store = Store.objects.get(seller=user)
+        
+        # Create the product
+        product = Product.objects.create(
+            store=store,
+            name=session.metadata['product_name'],
+            price=Decimal(session.metadata['product_price']),
+            description=session.metadata['product_description'],
+            stock_quantity=quantity
+        )
+        
+        # Reset session to seller_complete
+        session.state = 'seller_complete'
+        session.metadata = {}  # Clear product data
+        session.save()
+        
+        # Send success message
+        success_text = f"""
+✅ *Product Added Successfully!*
+
+*Product:* {product.name}
+*Price:* {product.price} ETB
+*Stock:* {product.stock_quantity} units
+
+Your product is now live in your store! Customers can see it and place orders.
+
+*What's next?*
+/addproduct - Add another product
+/myproducts - View all your products
+/mystore - See your store info
+        """
+        
+        send_telegram_message(chat_id, success_text, parse_mode='Markdown')
+        
+    except Store.DoesNotExist:
+        send_telegram_message(chat_id, "❌ You don't have a store yet. Please complete store setup with /start first.")
+        session.state = 'seller_complete'
+        session.save()
+    except Exception as e:
+        print(f"❌ Product creation error: {e}")
+        send_telegram_message(chat_id, "❌ Sorry, there was an error adding your product. Please try /addproduct again.")
+        session.state = 'seller_complete'
+        session.save()
     
     return JsonResponse({'status': 'success'})
 

@@ -3,6 +3,8 @@ from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 import uuid
 from decimal import Decimal
+from django.core.validators import RegexValidator
+
 
 # -------------------- USER --------------------
 class User(AbstractUser):
@@ -11,9 +13,15 @@ class User(AbstractUser):
         ('buyer', 'Buyer'),
     )
     user_type = models.CharField(max_length=10, choices=USER_TYPES)
-    telegram_id = models.CharField(max_length=50, blank=True, null=True)
-    phone_number = models.CharField(max_length=20, blank=True, null=True)
-    national_id = models.CharField(max_length=10, blank=True, null=True)
+    telegram_id = models.CharField(max_length=50)
+    phone_number = models.CharField(max_length=20)
+    national_id = models.CharField( max_length=12,
+        validators=[
+            RegexValidator(
+                regex=r'^\d{12}$',
+                message='National ID must be exactly 12 digits.'
+            )
+        ],)
 
     groups = models.ManyToManyField(
         'auth.Group',
